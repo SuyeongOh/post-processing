@@ -1,15 +1,14 @@
 BASE: ['']
 TOOLBOX_MODE: "unsupervised_method"      # "train_and_test"  or "only_test" or "unsupervised_method"
 UNSUPERVISED:
-  EXP_PROCESS: False
-  METHOD: ['POS', "ICA", "POS", "CHROM", "GREEN", "LGI", "PBV", "OMIT"]
-  METRICS: ['MAE', 'RMSE', 'MAPE', 'MACC', 'Pearson', 'SNR', 'BA']
+  METHOD: ["ICA", "POS", "CHROM", "GREEN", "LGI", "PBV", "OMIT"]
+  METRICS: ['MAE', 'RMSE', 'MAPE', 'Pearson', 'SNR', 'BA']
   DATA:
     FS: 30
-    DATASET: PURE
+    DATASET: UBFC-rPPG
     DO_PREPROCESS: False               # if first time, should be true
     DATA_FORMAT: NDHWC
-    DATA_PATH: "/home/jupiter/rppg_dataset/PURE"                     # Raw dataset path, need to be updated
+    DATA_PATH: "/home/jupiter/rppg_dataset/UBFC"                     # Raw dataset path, need to be updated
     CACHED_PATH: "./PreprocessedData"     # Processed dataset save path, need to be updated
     EXP_DATA_NAME: ""
     BEGIN: 0.0
@@ -30,12 +29,8 @@ UNSUPERVISED:
           DYNAMIC_DETECTION_FREQUENCY : 30
           USE_MEDIAN_FACE_BOX: False    # This should be used ONLY if dynamic detection is used
       RESIZE:
-        H: 16
-        W: 16
-
-DO_HILBERT: True
-DO_ORDER_BPF: 0
-
+        H: 32
+        W: 32
 INFERENCE:
   EVALUATION_METHOD: "FFT"        # "FFT" or "peak detection"
   EVALUATION_WINDOW:
