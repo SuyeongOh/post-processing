@@ -183,6 +183,10 @@ if __name__ == "__main__":
             train_loader = data_loader.PhysDriveLoader.PhysDriveLoader
         elif config.TRAIN.DATA.DATASET == "vv100":
             test_loader = data_loader.vv100Loader.vv100Loader
+        elif config.TRAIN.DATA.DATASET == "LADH":
+            train_loader = data_loader.LADHLoader.LADHLoader
+        elif config.TRAIN.DATA.DATASET == "SUMS":
+            train_loader = data_loader.SUMSLoader.SUMSLoader
         else:
             raise ValueError("Unsupported dataset! Currently supporting UBFC-rPPG, PURE, MMPD, \
                              SCAMPS, BP4D+ (Normal and BigSmall preprocessing), UBFC-PHYS and iBVP.")
@@ -228,6 +232,10 @@ if __name__ == "__main__":
             valid_loader = data_loader.PhysDriveLoader.PhysDriveLoader
         elif config.VALID.DATA.DATASET == "vv100":
             test_loader = data_loader.vv100Loader.vv100Loader
+        elif config.VALID.DATA.DATASET == "LADH":
+            valid_loader = data_loader.LADHLoader.LADHLoader
+        elif config.VALID.DATA.DATASET == "SUMS":
+            valid_loader = data_loader.SUMSLoader.SUMSLoader
         elif config.VALID.DATA.DATASET is None and not config.TEST.USE_LAST_EPOCH:
             raise ValueError("Validation dataset not specified despite USE_LAST_EPOCH set to False!")
         else:
@@ -275,6 +283,10 @@ if __name__ == "__main__":
             test_loader = data_loader.PhysDriveLoader.PhysDriveLoader
         elif config.TEST.DATA.DATASET == "vv100":
             test_loader = data_loader.vv100Loader.vv100Loader
+        elif config.TEST.DATA.DATASET == "LADH":
+            test_loader = data_loader.LADHLoader.LADHLoader
+        elif config.TEST.DATA.DATASET == "SUMS":
+            test_loader = data_loader.SUMSLoader.SUMSLoader
         else:
             raise ValueError("Unsupported dataset! Currently supporting UBFC-rPPG, PURE, MMPD, \
                              SCAMPS, BP4D+ (Normal and BigSmall preprocessing), UBFC-PHYS and iBVP.")

@@ -11,3 +11,5 @@ import dataset.data_loader.UBFCPHYSLoader
 import dataset.data_loader.vv100Loader
 import dataset.data_loader.vvAllLoader
 import dataset.data_loader.PhysDriveLoader
+import dataset.data_loader.LADHLoader
+import dataset.data_loader.SUMSLoader
