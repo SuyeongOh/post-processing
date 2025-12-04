@@ -1,34 +1,10 @@
 import csv
 import os
-
 import numpy as np
-import pandas as pd
 import torch
-from evaluation.post_process import *
 from tqdm import tqdm
 from evaluation.BlandAltmanPy import BlandAltman
-
-def read_label(dataset):
-    """Read manually corrected labels."""
-    df = pd.read_csv("label/{0}_Comparison.csv".format(dataset))
-    out_dict = df.to_dict(orient='index')
-    out_dict = {str(value['VideoID']): value for key, value in out_dict.items()}
-    return out_dict
-
-
-def read_hr_label(feed_dict, index):
-    """Read manually corrected UBFC labels."""
-    # For UBFC only
-    if index[:7] == 'subject':
-        index = index[7:]
-    video_dict = feed_dict[index]
-    if video_dict['Preferred'] == 'Peak Detection':
-        hr = video_dict['Peak Detection']
-    elif video_dict['Preferred'] == 'FFT':
-        hr = video_dict['FFT']
-    else:
-        hr = video_dict['Peak Detection']
-    return index, hr
+from evaluation.post_process import calculate_metric_per_video  # 가정: 이 함수가 import 되어 있다고 전제
 
 
 def _reform_data_from_dict(data, flatten=True):
@@ -44,196 +20,168 @@ def _reform_data_from_dict(data, flatten=True):
 
     return sort_data
 
-headers = ['ENV', 'MAE', 'RMSE', 'MAPE', 'Pearson', 'SNR']
 
 def calculate_metrics(predictions, labels, config):
     """Calculate rPPG Metrics (MAE, RMSE, MAPE, Pearson Coef.)."""
-    predict_hr_fft_all = list()
-    gt_hr_fft_all = list()
-    predict_hr_peak_all = list()
-    gt_hr_peak_all = list()
-    SNR_all = list()
-    MACC_all = list()
-    print("Calculating metrics!")
-    for index in tqdm(predictions.keys(), ncols=80):
-        prediction = _reform_data_from_dict(predictions[index])
-        label = _reform_data_from_dict(labels[index])
 
-        video_frame_size = prediction.shape[0]
-        if config.INFERENCE.EVALUATION_WINDOW.USE_SMALLER_WINDOW:
-            window_frame_size = config.INFERENCE.EVALUATION_WINDOW.WINDOW_SIZE * config.TEST.DATA.FS
-            if window_frame_size > video_frame_size:
-                window_frame_size = video_frame_size
-        else:
-            window_frame_size = video_frame_size
+    # 3. 파일명 포맷 변경: result_{DATASET}_{MODEL}.csv
+    dataset_name = config.TEST.DATA.DATASET
+    model_name = config.MODEL.NAME
+    csv_file = f'./results/result_{dataset_name}_{model_name}.csv'
 
-        for i in range(0, len(prediction), window_frame_size):
-            pred_window = prediction[i:i+window_frame_size]
-            label_window = label[i:i+window_frame_size]
+    # 2. CSV 헤더 순서 정의
+    headers = ['EVALUATION_METHOD', 'MODEL', 'POST_PROCESSING', 'MAE', 'RMSE', 'MAPE', 'Pearson', 'SNR']
 
-            if len(pred_window) < 9:
-                print(f"Window frame size of {len(pred_window)} is smaller than minimum pad length of 9. Window ignored!")
-                continue
-
-            if config.TEST.DATA.PREPROCESS.LABEL_TYPE == "Standardized" or \
-                    config.TEST.DATA.PREPROCESS.LABEL_TYPE == "Raw":
-                diff_flag_test = False
-            elif config.TEST.DATA.PREPROCESS.LABEL_TYPE == "DiffNormalized":
-                diff_flag_test = True
-            else:
-                raise ValueError("Unsupported label type in testing!")
-
-            if config.INFERENCE.EVALUATION_METHOD == "peak detection":
-                gt_hr_peak, pred_hr_peak, SNR, macc = calculate_metric_per_video(
-                    pred_window, label_window, diff_flag=diff_flag_test, fs=config.TEST.DATA.FS, hr_method='Peak')
-                gt_hr_peak_all.append(gt_hr_peak)
-                predict_hr_peak_all.append(pred_hr_peak)
-                SNR_all.append(SNR)
-                MACC_all.append(macc)
-            elif config.INFERENCE.EVALUATION_METHOD == "FFT":
-                gt_hr_fft, pred_hr_fft, SNR, macc = calculate_metric_per_video(
-                    pred_window, label_window, diff_flag=diff_flag_test, fs=config.TEST.DATA.FS, hr_method='FFT')
-                gt_hr_fft_all.append(gt_hr_fft)
-                predict_hr_fft_all.append(pred_hr_fft)
-                SNR_all.append(SNR)
-                MACC_all.append(macc)
-            else:
-                raise ValueError("Inference evaluation method name wrong!")
-
-    # Filename ID to be used in any results files (e.g., Bland-Altman plots) that get saved
-    if config.TOOLBOX_MODE == 'train_and_test':
-        filename_id = config.TRAIN.MODEL_FILE_NAME
-    elif config.TOOLBOX_MODE == 'only_test':
-        model_file_root = config.INFERENCE.MODEL_PATH.split("/")[-1].split(".pth")[0]
-        filename_id = model_file_root + "_" + config.TEST.DATA.DATASET
-    else:
-        raise ValueError('Metrics.py evaluation only supports train_and_test and only_test!')
-
-    print(f"====== DISPLAY METRICS ======")
-    resize_size = config.TEST.DATA.PREPROCESS.RESIZE.W
-    print(f"DATA IMAGE RESOLUTION: [{resize_size} x {resize_size}], ORDER_BPF={config.DO_ORDER_BPF}, HILBERT={config.DO_HILBERT}")
-    csv_file = f'./results/result_{config.MODEL.NAME}.csv'
+    # CSV 파일 초기화 (헤더 작성)
+    if not os.path.exists(os.path.dirname(csv_file)):
+        os.makedirs(os.path.dirname(csv_file), exist_ok=True)
 
     if not os.path.exists(csv_file):
         with open(csv_file, mode='w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(headers)
 
-    result_row = [f'{resize_size}x{resize_size}, BPF={config.DO_ORDER_BPF}, HILBERT={config.DO_HILBERT}']
+    print(f"====== DISPLAY METRICS ======")
+    print(f"Dataset: {dataset_name} | Model: {model_name}")
 
-    if config.INFERENCE.EVALUATION_METHOD == "FFT":
-        gt_hr_fft_all = np.array(gt_hr_fft_all)
-        predict_hr_fft_all = np.array(predict_hr_fft_all)
+    # 1. config.INFERENCE.EVALUATION_METHOD 리스트 전체 순회
+    # 예: config.INFERENCE.EVALUATION_METHOD = ["FFT", "peak detection"]
+    for eval_method in config.INFERENCE.EVALUATION_METHOD:
+        print(f"Processing Evaluation Method: {eval_method}")
+
+        predict_hr_all = list()
+        gt_hr_all = list()
+        SNR_all = list()
+
+        # Post Processing 설정 확인
+        # Diff Flag 설정
+        if config.TEST.DATA.PREPROCESS.LABEL_TYPE == "Standardized" or \
+                config.TEST.DATA.PREPROCESS.LABEL_TYPE == "Raw":
+            diff_flag_test = False
+        elif config.TEST.DATA.PREPROCESS.LABEL_TYPE == "DiffNormalized":
+            diff_flag_test = True
+        else:
+            raise ValueError("Unsupported label type in testing!")
+
+        # Bandpass Filter 설정 (Config에 없으면 기본값 True로 가정)
+        use_bandpass = True
+        if hasattr(config.TEST, 'POST_PROCESS') and hasattr(config.TEST.POST_PROCESS, 'USE_BANDPASS'):
+            use_bandpass = config.TEST.POST_PROCESS.USE_BANDPASS
+
+        # 4. POST_PROCESSING 리스트 생성 (CSV 저장용)
+        post_processing_list = [f"DiffNormalized={diff_flag_test}", f"Bandpass={use_bandpass}"]
+        post_processing_str = " | ".join(post_processing_list)
+
+        # 데이터 순회 및 HR 계산
+        for index in tqdm(predictions.keys(), ncols=80, desc=f"Calculating {eval_method}"):
+            prediction = _reform_data_from_dict(predictions[index])
+            label = _reform_data_from_dict(labels[index])
+
+            video_frame_size = prediction.shape[0]
+            if config.INFERENCE.EVALUATION_WINDOW.USE_SMALLER_WINDOW:
+                window_frame_size = config.INFERENCE.EVALUATION_WINDOW.WINDOW_SIZE * config.TEST.DATA.FS
+                if window_frame_size > video_frame_size:
+                    window_frame_size = video_frame_size
+            else:
+                window_frame_size = video_frame_size
+
+            for i in range(0, len(prediction), window_frame_size):
+                pred_window = prediction[i:i + window_frame_size]
+                label_window = label[i:i + window_frame_size]
+
+                if len(pred_window) < 9:
+                    continue
+
+                # Method string normalization for calculate_metric_per_video
+                if eval_method == "peak detection":
+                    hr_method_arg = "Peak"
+                elif eval_method == "FFT":
+                    hr_method_arg = "FFT"
+                else:
+                    hr_method_arg = eval_method  # Fallback
+
+                # 4. calculate_metric_per_video 호출 (diff_flag, use_bandpassfilter 전달)
+                # 함수 시그니처가 (predictions, labels, fs, diff_flag, use_bandpass, hr_method) 형태라고 가정합니다.
+                # rPPG-Toolbox 버전에 따라 인자 순서가 다를 수 있으니 확인 후 키워드 인자(keyword arguments) 사용을 권장합니다.
+                gt_hr, pred_hr, snr, _ = calculate_metric_per_video(
+                    pred_window,
+                    label_window,
+                    diff_flag=diff_flag_test,
+                    fs=config.TEST.DATA.FS,
+                    hr_method=hr_method_arg,
+                    use_bandpassfilter=use_bandpass  # 요구사항 반영
+                )
+
+                gt_hr_all.append(gt_hr)
+                predict_hr_all.append(pred_hr)
+                SNR_all.append(snr)
+
+        # 수집된 결과로 Metric 계산
+        gt_hr_all = np.array(gt_hr_all)
+        predict_hr_all = np.array(predict_hr_all)
         SNR_all = np.array(SNR_all)
-        MACC_all = np.array(MACC_all)
-        num_test_samples = len(predict_hr_fft_all)
+        num_test_samples = len(predict_hr_all)
+
+        # CSV 저장을 위한 Row 데이터 시작
+        # 컬럼 순서: EVALUATION_METHOD, MODEL, POST_PROCESSING
+        result_row = [eval_method, model_name, post_processing_str]
+
+        # Metric 계산 및 출력
         for metric in config.TEST.METRICS:
             if metric == "MAE":
-                MAE_FFT = np.mean(np.abs(predict_hr_fft_all - gt_hr_fft_all))
-                standard_error = np.std(np.abs(predict_hr_fft_all - gt_hr_fft_all)) / np.sqrt(num_test_samples)
-                result_row.append(f'{MAE_FFT:.3f} ± {standard_error:.3f}')
-                print("FFT MAE (FFT Label): {0:.3f} +/- {1:.3f}".format(MAE_FFT, standard_error))
+                MAE = np.mean(np.abs(predict_hr_all - gt_hr_all))
+                std_err = np.std(np.abs(predict_hr_all - gt_hr_all)) / np.sqrt(num_test_samples)
+                result_row.append(f'{MAE:.3f} ± {std_err:.3f}')
+                print(f"{eval_method} MAE: {MAE:.3f} +/- {std_err:.3f}")
+
             elif metric == "RMSE":
-                RMSE_FFT = np.sqrt(np.mean(np.square(predict_hr_fft_all - gt_hr_fft_all)))
-                standard_error = np.std(np.square(predict_hr_fft_all - gt_hr_fft_all)) / np.sqrt(num_test_samples)
-                result_row.append(f'{RMSE_FFT:.3f} ± {standard_error:.3f}')
-                print("FFT RMSE (FFT Label): {0:.3f} +/- {1:.3f}".format(RMSE_FFT, standard_error))
+                RMSE = np.sqrt(np.mean(np.square(predict_hr_all - gt_hr_all)))
+                std_err = np.std(np.square(predict_hr_all - gt_hr_all)) / np.sqrt(num_test_samples)
+                result_row.append(f'{RMSE:.3f} ± {std_err:.3f}')
+                print(f"{eval_method} RMSE: {RMSE:.3f} +/- {std_err:.3f}")
+
             elif metric == "MAPE":
-                MAPE_FFT = np.mean(np.abs((predict_hr_fft_all - gt_hr_fft_all) / gt_hr_fft_all)) * 100
-                standard_error = np.std(np.abs((predict_hr_fft_all - gt_hr_fft_all) / gt_hr_fft_all)) / np.sqrt(num_test_samples) * 100
-                result_row.append(f'{MAPE_FFT:.3f} ± {standard_error:.3f}')
-                print("FFT MAPE (FFT Label): {0:.3f} +/- {1:.3f}".format(MAPE_FFT, standard_error))
+                MAPE = np.mean(np.abs((predict_hr_all - gt_hr_all) / gt_hr_all)) * 100
+                std_err = np.std(np.abs((predict_hr_all - gt_hr_all) / gt_hr_all)) / np.sqrt(num_test_samples) * 100
+                result_row.append(f'{MAPE:.3f} ± {std_err:.3f}')
+                print(f"{eval_method} MAPE: {MAPE:.3f} +/- {std_err:.3f}")
+
             elif metric == "Pearson":
-                Pearson_FFT = np.corrcoef(predict_hr_fft_all, gt_hr_fft_all)
-                correlation_coefficient = Pearson_FFT[0][1]
-                standard_error = np.sqrt((1 - correlation_coefficient**2) / (num_test_samples - 2))
-                result_row.append(f'{correlation_coefficient:.3f} ± {standard_error:.3f}')
-                print("FFT Pearson (FFT Label): {0:.3f} +/- {1:.3f}".format(correlation_coefficient, standard_error))
+                corr = np.corrcoef(predict_hr_all, gt_hr_all)
+                pearson_val = corr[0][1]
+                std_err = np.sqrt((1 - pearson_val ** 2) / (num_test_samples - 2))
+                result_row.append(f'{pearson_val:.3f} ± {std_err:.3f}')
+                print(f"{eval_method} Pearson: {pearson_val:.3f} +/- {std_err:.3f}")
+
             elif metric == "SNR":
-                SNR_FFT = np.mean(SNR_all)
-                standard_error = np.std(SNR_all) / np.sqrt(num_test_samples)
-                result_row.append(f'{SNR_FFT:.3f} ± {standard_error:.3f}')
-                print("FFT SNR (FFT Label): {0:.3f} +/- {1:.3f} (dB)".format(SNR_FFT, standard_error))
-            elif metric == "MACC":
-                MACC_avg = np.mean(MACC_all)
-                standard_error = np.std(MACC_all) / np.sqrt(num_test_samples)
-                print("FFT MACC (FFT Label): {0} +/- {1}".format(MACC_avg, standard_error))
-            elif "AU" in metric:
-                pass
+                SNR_val = np.mean(SNR_all)
+                std_err = np.std(SNR_all) / np.sqrt(num_test_samples)
+                result_row.append(f'{SNR_val:.3f} ± {std_err:.3f}')
+                print(f"{eval_method} SNR: {SNR_val:.3f} +/- {std_err:.3f} (dB)")
+
             elif "BA" in metric:
-                compare = BlandAltman(gt_hr_fft_all, predict_hr_fft_all, config, averaged=True)
+                # Bland-Altman Plot (CSV에는 저장하지 않고 Plotting만 수행)
+                if config.TOOLBOX_MODE == 'train_and_test':
+                    filename_id = config.TRAIN.MODEL_FILE_NAME
+                else:
+                    model_file_root = config.INFERENCE.MODEL_PATH.split("/")[-1].split(".pth")[0]
+                    filename_id = f"{model_file_root}_{dataset_name}"
+
+                compare = BlandAltman(gt_hr_all, predict_hr_all, config, averaged=True)
                 compare.scatter_plot(
                     x_label='GT PPG HR [bpm]',
                     y_label='rPPG HR [bpm]',
                     show_legend=True, figure_size=(5, 5),
-                    the_title=f'{filename_id}_FFT_BlandAltman_ScatterPlot',
-                    file_name=f'{filename_id}_FFT_BlandAltman_ScatterPlot.pdf')
+                    the_title=f'{filename_id}_{eval_method}_BA_Scatter',
+                    file_name=f'{filename_id}_{eval_method}_BA_Scatter.pdf')
                 compare.difference_plot(
-                    x_label='Difference between rPPG HR and GT PPG HR [bpm]',
-                    y_label='Average of rPPG HR and GT PPG HR [bpm]',
+                    x_label='Difference [bpm]',
+                    y_label='Average [bpm]',
                     show_legend=True, figure_size=(5, 5),
-                    the_title=f'{filename_id}_FFT_BlandAltman_DifferencePlot',
-                    file_name=f'{filename_id}_FFT_BlandAltman_DifferencePlot.pdf')
-            else:
-                raise ValueError("Wrong Test Metric Type")
+                    the_title=f'{filename_id}_{eval_method}_BA_Diff',
+                    file_name=f'{filename_id}_{eval_method}_BA_Diff.pdf')
 
+        # 파일에 결과 쓰기
         with open(csv_file, mode='a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(result_row)
-
-    elif config.INFERENCE.EVALUATION_METHOD == "peak detection":
-        gt_hr_peak_all = np.array(gt_hr_peak_all)
-        predict_hr_peak_all = np.array(predict_hr_peak_all)
-        SNR_all = np.array(SNR_all)
-        MACC_all = np.array(MACC_all)
-        num_test_samples = len(predict_hr_peak_all)
-        for metric in config.TEST.METRICS:
-            if metric == "MAE":
-                MAE_PEAK = np.mean(np.abs(predict_hr_peak_all - gt_hr_peak_all))
-                standard_error = np.std(np.abs(predict_hr_peak_all - gt_hr_peak_all)) / np.sqrt(num_test_samples)
-                print("Peak MAE (Peak Label): {0} +/- {1}".format(MAE_PEAK, standard_error))
-            elif metric == "RMSE":
-                # Calculate the squared errors, then RMSE, in order to allow
-                # for a more robust and intuitive standard error that won't
-                # be influenced by abnormal distributions of errors.
-                squared_errors = np.square(predict_hr_peak_all - gt_hr_peak_all)
-                RMSE_PEAK = np.sqrt(np.mean(squared_errors))
-                standard_error = np.sqrt(np.std(squared_errors) / np.sqrt(num_test_samples))
-                print("PEAK RMSE (Peak Label): {0} +/- {1}".format(RMSE_PEAK, standard_error))
-            elif metric == "MAPE":
-                MAPE_PEAK = np.mean(np.abs((predict_hr_peak_all - gt_hr_peak_all) / gt_hr_peak_all)) * 100
-                standard_error = np.std(np.abs((predict_hr_peak_all - gt_hr_peak_all) / gt_hr_peak_all)) / np.sqrt(num_test_samples) * 100
-                print("PEAK MAPE (Peak Label): {0} +/- {1}".format(MAPE_PEAK, standard_error))
-            elif metric == "Pearson":
-                Pearson_PEAK = np.corrcoef(predict_hr_peak_all, gt_hr_peak_all)
-                correlation_coefficient = Pearson_PEAK[0][1]
-                standard_error = np.sqrt((1 - correlation_coefficient**2) / (num_test_samples - 2))
-                print("PEAK Pearson (Peak Label): {0} +/- {1}".format(correlation_coefficient, standard_error))
-            elif metric == "SNR":
-                SNR_PEAK = np.mean(SNR_all)
-                standard_error = np.std(SNR_all) / np.sqrt(num_test_samples)
-                print("PEAK SNR (PEAK Label): {0} +/- {1} (dB)".format(SNR_PEAK, standard_error))
-            elif metric == "MACC":
-                MACC_avg = np.mean(MACC_all)
-                standard_error = np.std(MACC_all) / np.sqrt(num_test_samples)
-                print("PEAK MACC (PEAK Label): {0} +/- {1}".format(MACC_avg, standard_error))
-            elif "AU" in metric:
-                pass
-            elif "BA" in metric:
-                compare = BlandAltman(gt_hr_peak_all, predict_hr_peak_all, config, averaged=True)
-                compare.scatter_plot(
-                    x_label='GT PPG HR [bpm]',
-                    y_label='rPPG HR [bpm]',
-                    show_legend=True, figure_size=(5, 5),
-                    the_title=f'{filename_id}_Peak_BlandAltman_ScatterPlot',
-                    file_name=f'{filename_id}_Peak_BlandAltman_ScatterPlot.pdf')
-                compare.difference_plot(
-                    x_label='Difference between rPPG HR and GT PPG HR [bpm]',
-                    y_label='Average of rPPG HR and GT PPG HR [bpm]',
-                    show_legend=True, figure_size=(5, 5),
-                    the_title=f'{filename_id}_Peak_BlandAltman_DifferencePlot',
-                    file_name=f'{filename_id}_Peak_BlandAltman_DifferencePlot.pdf')
-            else:
-                raise ValueError("Wrong Test Metric Type")
-    else:
-        raise ValueError("Inference evaluation method name wrong!")
