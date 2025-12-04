@@ -130,25 +130,29 @@ def _calculate_SNR(pred_ppg_signal, hr_label, fs=30, low_pass=0.6, high_pass=3.3
         SNR = 0
     return SNR
 
-def calculate_metric_per_video(predictions, labels, fs=30, diff_flag=True, use_bandpass=True, hr_method='FFT'):
+
+def calculate_metric_per_video(predictions, labels, fs=30, diff_flag=True, use_bandpass=True, hr_method='FFT',
+                               detrend_flag=True):
     """Calculate video-level HR and SNR"""
     if diff_flag:  # if the predictions and labels are 1st derivative of PPG signal.
-        predictions = _detrend(np.cumsum(predictions), 100)
-        labels = _detrend(np.cumsum(labels), 100)
-    else:
+        predictions = np.cumsum(predictions)
+        labels = np.cumsum(labels)
+
+    if detrend_flag:
         predictions = _detrend(predictions, 100)
         labels = _detrend(labels, 100)
+
     if use_bandpass:
         # bandpass filter between [0.75, 2.5] Hz, equals [45, 150] beats per min
         # bandpass filter between [0.6, 3.3] Hz, equals [36, 198] beats per min
         #
         # Note: to more closely match results in the NeurIPS 2023 toolbox paper,
-        # we recommend using 0.75 in place of 0.6 and 2.5 in place of 3.3 in the 
+        # we recommend using 0.75 in place of 0.6 and 2.5 in place of 3.3 in the
         # below line.
         [b, a] = butter(1, [0.6 / fs * 2, 3.3 / fs * 2], btype='bandpass')
         predictions = scipy.signal.filtfilt(b, a, np.double(predictions))
         labels = scipy.signal.filtfilt(b, a, np.double(labels))
-    
+
     macc = _compute_macc(predictions, labels)
 
     if hr_method == 'FFT':
