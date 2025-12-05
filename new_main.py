@@ -71,7 +71,7 @@ Dataset_Map = {
     "LADH": data_loader.LADHLoader.LADHLoader,
     "SUMS": data_loader.SUMSLoader.SUMSLoader,
     "COHFACE": data_loader.COHFACELoader.COHFACELoader,
-    "VIPL-HR": data_loader.VIPLHRLoader.VIPLHRLoader,
+    #"VIPL-HR": data_loader.VIPLHRLoader.VIPLHRLoader,
 
     # Aliases
     "UBFC-phys": data_loader.UBFCPHYSLoader.UBFCPHYSLoader,
@@ -252,6 +252,8 @@ def run_single_model_process(config, model_name, dataset_name):
 
 if __name__ == "__main__":
     # Logging Setup
+    os.makedirs('./logs', exist_ok=True)
+
     log_filename = f'./logs/{str(datetime.datetime.now()).replace(":", "_")[:19]}_integration_log.txt'
     sys.stdout = open(log_filename, 'w')
     print(f"Logging to {log_filename}")
