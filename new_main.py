@@ -72,13 +72,21 @@ Dataset_Map = {
     "SUMS": data_loader.SUMSLoader.SUMSLoader,
     "COHFACE": data_loader.COHFACELoader.COHFACELoader,
     #"VIPL-HR": data_loader.VIPLHRLoader.VIPLHRLoader,
-
-    # Aliases
-    "UBFC-phys": data_loader.UBFCPHYSLoader.UBFCPHYSLoader,
-    "VitalVideos": data_loader.vv100Loader.vv100Loader
+    "VitalVideos": data_loader.vvAllLoader.vvAllLoader
 }
 
-# 3. Model Name -> Data Format
+# 3. Dataset Path
+Base_DataPath = "/mnt/e/vitalvideos_tvstorm/dataset"
+DataPath_Map = {
+    "UBFC-rPPG": f'{Base_DataPath}/UBFC',
+    "PURE": f'{Base_DataPath}/PURE',
+    "VitalVideos": f'{Base_DataPath}/vv250',
+    # "SCAMPS": f'{Base_DataPath}',
+    # "UBFC-phys": f'{Base_DataPath}',
+    # "iBVP": f'{Base_DataPath}',
+}
+
+# 4. Model Name -> Data Format
 Format_Map = {
     'Physnet': 'NCDHW',
     'Tscan': 'NDCHW',
@@ -90,6 +98,8 @@ Format_Map = {
     'PhysMamba': 'NCDHW',
     'iBVPNet': 'NCDHW'
 }
+
+GLOBAL_CACHE_ROOT = "./dataset/exp"
 
 # =============================================================================
 # Helper Functions
@@ -200,23 +210,39 @@ def run_single_model_process(config, model_name, dataset_name):
     if 'UNSUPERVISED' in current_config and 'DATA' in current_config.UNSUPERVISED:
         current_config.UNSUPERVISED.DATA.DATASET = dataset_name
 
+    if dataset_name not in DataPath_Map:
+        print(f"Warning: Dataset '{dataset_name}' not found in DataPath_Map. Skipping...")
+        return
+
+    target_data_path = DataPath_Map[dataset_name]
+    target_cache_path = os.path.join(GLOBAL_CACHE_ROOT, dataset_name)
+    os.makedirs(target_cache_path, exist_ok=True)
+
+    sections = ['TRAIN', 'VALID', 'TEST', 'UNSUPERVISED']
+
+    for section in sections:
+        if section in current_config and 'DATA' in current_config[section]:
+            current_config[section].DATA.DATASET = dataset_name
+            current_config[section].DATA.DATA_PATH = target_data_path
+            current_config[section].DATA.CACHED_PATH = target_cache_path
+
     # 3. Update Data Format (based on Model using Global Map)
     if model_name in Format_Map:
         new_format = Format_Map[model_name]
-        if 'TRAIN' in current_config and 'DATA' in current_config.TRAIN:
-            current_config.TRAIN.DATA.DATA_FORMAT = new_format
-        if 'VALID' in current_config and 'DATA' in current_config.VALID:
-            current_config.VALID.DATA.DATA_FORMAT = new_format
-        if 'TEST' in current_config and 'DATA' in current_config.TEST:
-            current_config.TEST.DATA.DATA_FORMAT = new_format
+        for section in sections:
+            if section in current_config and 'DATA' in current_config[section]:
+                current_config[section].DATA.DATA_FORMAT = new_format
         print(f"  -> Set DATA_FORMAT to '{new_format}'")
 
     current_config.freeze()
 
     print('  -> Configuration Snapshot:')
     print(f"     Toolbox Mode: {current_config.TOOLBOX_MODE}")
-    print(f"     Dataset: {current_config.TRAIN.DATA.DATASET if current_config.TOOLBOX_MODE == 'train_and_test' else 'N/A'}")
+    print(
+        f"     Dataset: {current_config.TRAIN.DATA.DATASET if current_config.TOOLBOX_MODE == 'train_and_test' else 'N/A'}")
     print(f"     Model: {current_config.MODEL.NAME}")
+    print(f"     Data Path: {target_data_path}")
+    print(f"     Cache Path: {target_cache_path}")
 
     try:
         # Data Loader Setup

@@ -20,3 +20,5 @@ debug_utils_physnet.py
 test.yaml
 *.out
 logs
+
+dataset/exp
