@@ -34,10 +34,8 @@ def unsupervised_predict(config, data_loader, method_name):
         for idx in range(batch_size):
             data_input, labels_input = test_batch[0][idx].cpu().numpy(), test_batch[1][idx].cpu().numpy()
             data_input = data_input[..., :3]
-            if method_name == "POS_WANG":
+            if method_name == "POS":
                 BVP = POS_WANG(config, data_input, config.UNSUPERVISED.DATA.FS)
-            elif method_name == "POS_VITALSYNC":
-                BVP = POS_VITALSYNC(config, data_input, config.UNSUPERVISED.DATA.FS)
             elif method_name == "CHROM":
                 BVP = CHROME_DEHAAN(config, data_input)
             elif method_name == "ICA":
